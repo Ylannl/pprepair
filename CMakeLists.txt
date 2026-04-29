@@ -34,7 +34,10 @@ find_package( CGAL 6 REQUIRED )
 
 # Boost
 find_package( Boost 1.50.0 REQUIRED )
-find_package( GDAL 3.0 )
+
+# GDAL (for I/O)
+find_package( GDAL 3.0 REQUIRED )
+include_directories( ${GDAL_INCLUDE_DIR} )
 
 # Creating entries for target: pprepair
 # ############################
