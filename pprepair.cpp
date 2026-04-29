@@ -49,7 +49,7 @@ int main(int argc, const char *argv[]) {
     std::cout << "=== pprepair Help ===" << std::endl;
     std::cout << "    Simple:   pprepair [options]" << std::endl;
     std::cout << "    Advanced: pprepair -p [processing steps in order]" << std::endl;
-    std::cout << "    Example:  ./pprepair -i \"myInput.shp\" -o \"myOutput.shp\" -fix" << std::endl;
+    std::cout << "    Example:  ./pprepair -i \"myInput.gpkg\" -o \"myOutput.gpkg\" -fix" << std::endl;
     std::cout << "== Basic options ==" << std::endl;
     std::cout << "    -i filename [schemaindex] Add this file to the triangulation using this schema index" << std::endl;
     std::cout << "    -o filename  Output the reconstructed polygons in this file" << std::endl;
