@@ -45,7 +45,7 @@ bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &e
   for (int currentLayer = 0; currentLayer < numberOfLayers; currentLayer++) {
     OGRLayer *dataLayer = dataSource->GetLayer(currentLayer);
     dataLayer->ResetReading();
-    OGRSpatialReference* tmp = dataLayer->GetSpatialRef();
+    const OGRSpatialReference* tmp = dataLayer->GetSpatialRef();
     if ( (tmp != NULL) && (spatialReference != NULL) ) {
       spatialReference = tmp->Clone();
     }
@@ -120,7 +120,8 @@ bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &e
 				}
 					
           // Receiving multi polygons
-				case wkbMultiPolygon: {
+				case wkbMultiPolygon:
+        case wkbMultiPolygon25D: {
 					OGRMultiPolygon *geometry = static_cast<OGRMultiPolygon *>(feature->GetGeometryRef());
 					
 					// Check each polygon
@@ -1566,19 +1567,19 @@ std::vector<Ring *> IOWorker::splitRing(Ring &ring) {
 	for (Triangulation::Subconstraint_iterator currentEdge = ringTriangulation.subconstraints_begin();
        currentEdge != ringTriangulation.subconstraints_end();
        ++currentEdge) {
-    //std::cout << "Checking subconstraint: <" << *(currentEdge->first.first) << ", " << *(currentEdge->first.second) << ">: " << ringTriangulation.number_of_enclosing_constraints(currentEdge->first.first, currentEdge->first.second) << " enclosing constraints." << std::endl;
+    //std::cout << "Checking subconstraint: <" << *((*currentEdge).first) << ", " << *((*currentEdge).second) << ">: " << ringTriangulation.number_of_enclosing_constraints((*currentEdge).first, (*currentEdge).second) << " enclosing constraints." << std::endl;
 		// Subconstraint_iterator has a weird return value...
-		if (ringTriangulation.number_of_enclosing_constraints(currentEdge->first.first, currentEdge->first.second) % 2 == 0) {
+		if (ringTriangulation.number_of_enclosing_constraints((*currentEdge).first, (*currentEdge).second) % 2 == 0) {
 			Triangulation::Face_handle f;
 			int i;
-			ringTriangulation.is_edge(currentEdge->first.first, currentEdge->first.second, f, i);
+			ringTriangulation.is_edge((*currentEdge).first, (*currentEdge).second, f, i);
       if (ringTriangulation.is_constrained(std::pair<Triangulation::Face_handle, int>(f, i))) {
         //std::cout << "Removing constraint..." << std::endl;
-        Triangulation::Constraint_id cid = ringTriangulation.insert_constraint(currentEdge->first.first, currentEdge->first.second);
+        Triangulation::Constraint_id cid = ringTriangulation.insert_constraint((*currentEdge).first, (*currentEdge).second);
         ringTriangulation.remove_constraint(cid);
       } else {
         //std::cout << "Adding constraint..." << std::endl;
-        ringTriangulation.insert_constraint(currentEdge->first.first, currentEdge->first.second);
+        ringTriangulation.insert_constraint((*currentEdge).first, (*currentEdge).second);
       }
 		}
 	}
