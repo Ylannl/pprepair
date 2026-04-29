@@ -1242,7 +1242,7 @@ bool IOWorker::exportPolygons(std::vector<std::pair<PolygonHandle *, Polygon> > 
 	
 	// Prepare file
   std::filesystem::path extension = std::filesystem::path(file).extension();
-	const char *driverName;
+	const char *driverName = NULL;
   if (extension.compare(".csv") == 0) driverName = "CSV";
   else if (extension.compare(".dxf") == 0) driverName = "DXF";
   else if (extension.compare(".gdb") == 0) driverName = "FileGDB";
