@@ -668,24 +668,28 @@ bool IOWorker::repairRegionsByRandomNeighbour(Triangulation &triangulation, bool
 				}
 			}
 			
-			// Find a random tag
-			PolygonHandle *tagToAssign;
-			while (true) {
-				std::set<Triangulation::Face_handle>::iterator randomFace = facesInRegion.begin();
-				std::advance(randomFace, rand()%facesInRegion.size());
-				int neighbourIndex = rand()%3;
-				unsigned long numberOfTags = (*randomFace)->neighbor(neighbourIndex)->info().numberOfTags();
-				if (numberOfTags == 0) continue;
-				if (numberOfTags == 1) {
-					tagToAssign = (*randomFace)->neighbor(neighbourIndex)->info().getTags();
-					if (alsoUniverse || tagToAssign != &universe) break;
-				} else {
-					std::list<PolygonHandle *>::const_iterator randomTag = static_cast<MultiPolygonHandle *>((*randomFace)->neighbor(neighbourIndex)->info().getTags())->getHandles()->begin();
-					std::advance(randomTag, rand()%numberOfTags);
-					tagToAssign = *randomTag;
-					if (alsoUniverse || tagToAssign != &universe) break;
+			// Collect all candidate tags from neighboring faces
+			std::vector<PolygonHandle *> candidateTags;
+			for (std::set<Triangulation::Face_handle>::iterator currentFaceInRegion = facesInRegion.begin(); currentFaceInRegion != facesInRegion.end(); ++currentFaceInRegion) {
+				for (int neighbourIndex = 0; neighbourIndex < 3; ++neighbourIndex) {
+					if (facesInRegion.count((*currentFaceInRegion)->neighbor(neighbourIndex))) continue;
+					PolygonHandle *neighbourTags = (*currentFaceInRegion)->neighbor(neighbourIndex)->info().getTags();
+					if (neighbourTags == NULL) continue;
+					if (!alsoUniverse && neighbourTags == &universe) continue;
+					if (!neighbourTags->isMultiPolygonHandle()) {
+						if (alsoUniverse || neighbourTags != &universe)
+							candidateTags.push_back(neighbourTags);
+					} else {
+						MultiPolygonHandle *multi = static_cast<MultiPolygonHandle *>(neighbourTags);
+						for (std::list<PolygonHandle *>::const_iterator it = multi->getHandles()->begin(); it != multi->getHandles()->end(); ++it) {
+							if (alsoUniverse || *it != &universe)
+								candidateTags.push_back(*it);
+						}
+					}
 				}
 			}
+			if (candidateTags.empty()) continue;
+			PolygonHandle *tagToAssign = candidateTags[rand() % candidateTags.size()];
 			
 			// Assign the region to the random tag
 			for (std::set<Triangulation::Face_handle>::iterator currentFaceInRegion = facesInRegion.begin(); currentFaceInRegion != facesInRegion.end(); ++currentFaceInRegion) {
