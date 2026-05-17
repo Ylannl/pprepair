@@ -42,6 +42,7 @@
 #include <CGAL/Constrained_Delaunay_triangulation_2.h>
 #include <CGAL/Triangulation_hierarchy_2.h>
 #include <CGAL/Constrained_triangulation_plus_2.h>
+#include <CGAL/Projection_traits_xy_3.h>
 
 // VertexInfo for SAFE
 #ifdef USE_VERTEX_INFO
@@ -56,26 +57,28 @@ typedef CGAL::Exact_predicates_exact_constructions_kernel K;
 typedef CGAL::Exact_predicates_inexact_constructions_kernel K;
 #endif
 
+typedef CGAL::Projection_traits_xy_3<K> GT;
+
 // Low level stuff
 #ifdef TRIANGULATION_HIERARCHY
 #ifdef USE_VERTEX_INFO
-typedef CGAL::Triangulation_vertex_base_with_info_2<VertexInfo,K> TVB;
+typedef CGAL::Triangulation_vertex_base_with_info_2<VertexInfo,GT> TVB;
 #else
-typedef CGAL::Triangulation_vertex_base_2<K> TVB;
+typedef CGAL::Triangulation_vertex_base_2<GT> TVB;
 #endif
 typedef CGAL::Triangulation_hierarchy_vertex_base_2<TVB> VB;
 #else
-typedef CGAL::Triangulation_vertex_base_2<K> VB;
+typedef CGAL::Triangulation_vertex_base_2<GT> VB;
 #endif
-typedef CGAL::Constrained_triangulation_face_base_2<K> FB;
-typedef CGAL::Triangulation_face_base_with_info_2<FaceInfo, K, FB> FBWI;
+typedef CGAL::Constrained_triangulation_face_base_2<GT> FB;
+typedef CGAL::Triangulation_face_base_with_info_2<FaceInfo, GT, FB> FBWI;
 typedef CGAL::Triangulation_data_structure_2<VB, FBWI> TDS;
 typedef CGAL::Exact_predicates_tag PT;
 typedef CGAL::Exact_intersections_tag IT;
 #ifdef EXACT_CONSTRUCTIONS
-typedef CGAL::Constrained_Delaunay_triangulation_2<K, TDS, IT> CDT;
+typedef CGAL::Constrained_Delaunay_triangulation_2<GT, TDS, IT> CDT;
 #else
-typedef CGAL::Constrained_Delaunay_triangulation_2<K, TDS, PT> CDT;
+typedef CGAL::Constrained_Delaunay_triangulation_2<GT, TDS, PT> CDT;
 #endif
 #ifdef TRIANGULATION_HIERARCHY
 typedef CGAL::Triangulation_hierarchy_2<CDT> CDTH;
@@ -87,7 +90,7 @@ typedef CGAL::Constrained_triangulation_plus_2<CDT> Triangulation;
 // Other types, for easy reading
 typedef Triangulation::Point Point;
 typedef Triangulation::Segment Segment;
-typedef CGAL::Polygon_2<K> Ring;
+typedef CGAL::Polygon_2<GT> Ring;
 
 // Non CGAL types
 //typedef std::vector<std::pair<std::vector<Triangulation::Vertex_handle>,

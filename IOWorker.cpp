@@ -96,7 +96,10 @@ bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &e
 			// STEP 1: Get polygons from input
 			std::vector<std::list<Point> > outerRingsList;
 			std::vector<std::list<Point> > innerRingsList;
-			switch(feature->GetGeometryRef()->getGeometryType()) {
+			OGRwkbGeometryType geomType = feature->GetGeometryRef()->getGeometryType();
+			if (geomType == wkbPolygon25D || geomType == wkbMultiPolygon25D)
+				hasZValues = true;
+			switch(geomType) {
           
           // Most typical case, receiving polygons
         case wkbPolygon:
@@ -107,7 +110,8 @@ bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &e
 					// Get outer ring
 					for (int currentPoint = 0; currentPoint < geometry->getExteriorRing()->getNumPoints(); currentPoint++)
 						outerRingsList.back().push_back(Point(geometry->getExteriorRing()->getX(currentPoint),
-                                                  geometry->getExteriorRing()->getY(currentPoint)));
+                                                  geometry->getExteriorRing()->getY(currentPoint),
+                                                  geometry->getExteriorRing()->getZ(currentPoint)));
 					
 					// Get inner rings
 					innerRingsList.reserve(geometry->getNumInteriorRings());
@@ -115,7 +119,8 @@ bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &e
 						innerRingsList.push_back(std::list<Point>());
 						for (int currentPoint = 0; currentPoint < geometry->getInteriorRing(currentRing)->getNumPoints(); currentPoint++) {
 							innerRingsList.back().push_back(Point(geometry->getInteriorRing(currentRing)->getX(currentPoint),
-                                                    geometry->getInteriorRing(currentRing)->getY(currentPoint)));
+                                                    geometry->getInteriorRing(currentRing)->getY(currentPoint),
+                                                    geometry->getInteriorRing(currentRing)->getZ(currentPoint)));
 						}
 					} break;
 				}
@@ -133,7 +138,8 @@ bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &e
 						// Get outer ring
 						for (int currentPoint = 0; currentPoint < thisGeometry->getExteriorRing()->getNumPoints(); currentPoint++)
 							outerRingsList.back().push_back(Point(thisGeometry->getExteriorRing()->getX(currentPoint),
-                                                    thisGeometry->getExteriorRing()->getY(currentPoint)));
+                                                    thisGeometry->getExteriorRing()->getY(currentPoint),
+                                                    thisGeometry->getExteriorRing()->getZ(currentPoint)));
 						
 						// Get inner rings
 						innerRingsList.reserve(innerRingsList.size()+thisGeometry->getNumInteriorRings());
@@ -141,7 +147,8 @@ bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &e
 							innerRingsList.push_back(std::list<Point>());
 							for (int currentPoint = 0; currentPoint < thisGeometry->getInteriorRing(currentRing)->getNumPoints(); currentPoint++) {
 								innerRingsList.back().push_back(Point(thisGeometry->getInteriorRing(currentRing)->getX(currentPoint),
-                                                      thisGeometry->getInteriorRing(currentRing)->getY(currentPoint)));
+                                                      thisGeometry->getInteriorRing(currentRing)->getY(currentPoint),
+                                                      thisGeometry->getInteriorRing(currentRing)->getZ(currentPoint)));
 							}
 						}
 					} break;
@@ -1320,14 +1327,14 @@ bool IOWorker::exportPolygons(std::vector<std::pair<PolygonHandle *, Polygon> > 
 		for (Ring::Vertex_iterator currentVertex = currentPolygon->second.outer_boundary().vertices_begin();
          currentVertex != currentPolygon->second.outer_boundary().vertices_end();
          ++currentVertex) {
-			outerRing.addPoint(CGAL::to_double(currentVertex->x()), CGAL::to_double(currentVertex->y()));
-		} outerRing.addPoint(CGAL::to_double(currentPolygon->second.outer_boundary().vertex(0).x()), CGAL::to_double(currentPolygon->second.outer_boundary().vertex(0).y()));
+			addPointToRing(outerRing, *currentVertex);
+		} addPointToRing(outerRing, currentPolygon->second.outer_boundary().vertex(0));
 		polygon.addRing(&outerRing);
 		for (Polygon::Hole_const_iterator currentRing = currentPolygon->second.holes_begin(); currentRing != currentPolygon->second.holes_end(); ++currentRing) {
 			OGRLinearRing innerRing;
 			for (Ring::Vertex_iterator currentVertex = currentRing->vertices_begin(); currentVertex != currentRing->vertices_end(); ++currentVertex) {
-				innerRing.addPoint(CGAL::to_double(currentVertex->x()), CGAL::to_double(currentVertex->y()));
-			} innerRing.addPoint(CGAL::to_double(currentRing->vertex(0).x()), CGAL::to_double(currentRing->vertex(0).y()));
+				addPointToRing(innerRing, *currentVertex);
+			} addPointToRing(innerRing, currentRing->vertex(0));
 			polygon.addRing(&innerRing);
 		} OGRFeature *feature = OGRFeature::CreateFeature(layer->GetLayerDefn());
 		if (withProvenance) {
@@ -1455,10 +1462,10 @@ bool IOWorker::exportTriangulation(Triangulation &t, const char *file, bool with
 	// Put fields in
 	for (CDT::Finite_faces_iterator currentFace = t.finite_faces_begin(); currentFace != t.finite_faces_end(); ++currentFace) {
 		OGRLinearRing ring;
-		ring.addPoint(CGAL::to_double((*(*currentFace).vertex(0)).point().x()), CGAL::to_double((*(*currentFace).vertex(0)).point().y()), 0.0);
-		ring.addPoint(CGAL::to_double((*(*currentFace).vertex(1)).point().x()), CGAL::to_double((*(*currentFace).vertex(1)).point().y()), 0.0);
-		ring.addPoint(CGAL::to_double((*(*currentFace).vertex(2)).point().x()), CGAL::to_double((*(*currentFace).vertex(2)).point().y()), 0.0);
-		ring.addPoint(CGAL::to_double((*(*currentFace).vertex(0)).point().x()), CGAL::to_double((*(*currentFace).vertex(0)).point().y()), 0.0);
+		addPointToRing(ring, (*(*currentFace).vertex(0)).point());
+		addPointToRing(ring, (*(*currentFace).vertex(1)).point());
+		addPointToRing(ring, (*(*currentFace).vertex(2)).point());
+		addPointToRing(ring, (*(*currentFace).vertex(0)).point());
 		OGRPolygon polygon;
 		polygon.addRing(&ring);
 		OGRFeature *feature = OGRFeature::CreateFeature(layer->GetLayerDefn());
@@ -1520,6 +1527,13 @@ bool IOWorker::exportTriangulation(Triangulation &t, const char *file, bool with
 	GDALClose(dataSource);
 	
 	return true;
+}
+
+void IOWorker::addPointToRing(OGRLinearRing &ring, const Point &p) {
+	if (hasZValues)
+		ring.addPoint(CGAL::to_double(p.x()), CGAL::to_double(p.y()), CGAL::to_double(p.z()));
+	else
+		ring.addPoint(CGAL::to_double(p.x()), CGAL::to_double(p.y()));
 }
 
 unsigned int IOWorker::removeDuplicateVertices(std::list<Point> &ring) {
