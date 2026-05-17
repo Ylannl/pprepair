@@ -120,10 +120,10 @@ private:
   // What is kept from input
 	std::vector<char *> fileNames;
   std::vector<PolygonHandle *> polygons;
-  OGRFieldType schemaFieldType;
+  OGRFieldType schemaFieldType = OFTString;
   std::vector<FieldDefinition *> fields;
   std::map<FieldDescriptor, unsigned int> fieldEquivalencies;
-  OGRSpatialReference* spatialReference;
+  OGRSpatialReference* spatialReference = nullptr;
   
   // Internal special tags
 	PolygonHandle universe;
@@ -134,6 +134,8 @@ private:
   
   // Helper functions
   void addPointToRing(OGRLinearRing &ring, const Point &p);
+  bool exportTriangulationObj(Triangulation &t, const char *file);
+  bool addObjToTriangulation(Triangulation &triangulation, TaggingVector &edgesToTag, const char *file, unsigned int schemaIndex);
   unsigned int removeDuplicateVertices(std::list<Point> &ring);
   std::vector<Ring *> splitRing(Ring &ring);
   void testRings(std::vector<Ring *> &outerRings, std::vector<Ring *> &innerRings, std::vector<std::vector<Ring> > &classification, long fid);

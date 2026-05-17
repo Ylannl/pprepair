@@ -27,6 +27,10 @@ IOWorker::IOWorker() {
 }
 
 bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &edgesToTag, const char *file, unsigned int schemaIndex) {
+  std::filesystem::path extension = std::filesystem::path(file).extension();
+  if (extension.compare(".obj") == 0) {
+    return addObjToTriangulation(triangulation, edgesToTag, file, schemaIndex);
+  }
   // Open file
 	GDALDataset *dataSource = (GDALDataset*) GDALOpenEx(file, GDAL_OF_READONLY, NULL, NULL, NULL);
 	if (dataSource == NULL) {
@@ -1380,6 +1384,9 @@ bool IOWorker::exportTriangulation(Triangulation &t, const char *file, bool with
 	
 	// Prepare file
   std::filesystem::path extension = std::filesystem::path(file).extension();
+  if (extension.compare(".obj") == 0) {
+    return exportTriangulationObj(t, file);
+  }
   const char *driverName;
   if (extension.compare(".csv") == 0) driverName = "CSV";
   else if (extension.compare(".dxf") == 0) driverName = "DXF";
@@ -1534,6 +1541,152 @@ void IOWorker::addPointToRing(OGRLinearRing &ring, const Point &p) {
 		ring.addPoint(CGAL::to_double(p.x()), CGAL::to_double(p.y()), CGAL::to_double(p.z()));
 	else
 		ring.addPoint(CGAL::to_double(p.x()), CGAL::to_double(p.y()));
+}
+
+bool IOWorker::addObjToTriangulation(Triangulation &triangulation, TaggingVector &edgesToTag, const char *file, unsigned int schemaIndex) {
+	std::ifstream objFile(file);
+	if (!objFile.is_open()) {
+		std::cerr << "Error: Could not open OBJ file " << file << std::endl;
+		return false;
+	}
+
+	char *name = new char[strlen(file)+1];
+	strcpy(name, file);
+	fileNames.push_back(name);
+	std::cout << "\tPath: " << name << std::endl;
+	std::cout << "\tType: Wavefront OBJ" << std::endl;
+
+	std::vector<K::Point_3> vertices;
+	std::vector<std::vector<int>> faceIndices;
+
+	std::string line;
+	while (std::getline(objFile, line)) {
+		if (line.empty() || line[0] == '#') continue;
+		std::istringstream iss(line);
+		std::string prefix;
+		iss >> prefix;
+
+		if (prefix == "v") {
+			double x, y, z = 0.0;
+			iss >> x >> y;
+			if (!(iss >> z)) z = 0.0;
+			if (z != 0.0) hasZValues = true;
+			vertices.push_back(K::Point_3(x, y, z));
+		} else if (prefix == "f") {
+			std::vector<int> indices;
+			std::string token;
+			while (iss >> token) {
+				int idx = std::stoi(token.substr(0, token.find('/')));
+				if (idx < 0) idx = (int)vertices.size() + idx + 1;
+				indices.push_back(idx);
+			}
+			if (indices.size() >= 3)
+				faceIndices.push_back(indices);
+			else
+				std::cout << "\tSkipping degenerate face with " << indices.size() << " vertices." << std::endl;
+		}
+	}
+	objFile.close();
+
+	long long numberOfPolygons = faceIndices.size();
+	std::cout << "\tReading layer #1 (" << numberOfPolygons << " faces)...\n\t>\n";
+	polygons.reserve(polygons.size()+numberOfPolygons);
+
+	for (size_t currentFace = 0; currentFace < faceIndices.size(); ++currentFace) {
+		std::vector<int> &indices = faceIndices[currentFace];
+		std::list<Point> ringPoints;
+		for (size_t i = 0; i < indices.size(); ++i) {
+			if (indices[i] < 1 || indices[i] > (int)vertices.size()) {
+				std::cout << "\tFace #" << currentFace << ": vertex index " << indices[i] << " out of range. Skipped." << std::endl;
+				ringPoints.clear();
+				break;
+			}
+			ringPoints.push_back(vertices[indices[i]-1]);
+		}
+		if (ringPoints.empty()) continue;
+
+		removeDuplicateVertices(ringPoints);
+		if (ringPoints.size() < 3) {
+			std::cout << "\tFace #" << currentFace << ": less than 3 vertices. Removed." << std::endl;
+			continue;
+		}
+
+		Ring ring(ringPoints.begin(), ringPoints.end());
+		if (!ring.is_simple()) {
+			std::cout << "\tFace #" << currentFace << " (" << ring.size() << " vertices): self intersecting. Split." << std::endl;
+			std::vector<Ring *> receivedRings = splitRing(ring);
+			for (auto rit = receivedRings.begin(); rit != receivedRings.end(); ++rit) {
+				if (!(*rit)->is_clockwise_oriented())
+					(*rit)->reverse_orientation();
+				PolygonHandle *handle = new PolygonHandle(schemaIndex, fileNames.back(), 0, currentFace);
+				polygons.push_back(handle);
+				edgesToTag.push_back(std::pair<std::vector<Triangulation::Constraint_id>, std::vector<std::vector<Triangulation::Constraint_id>>>());
+				for (Ring::Edge_const_iterator currentEdge = (*rit)->edges_begin();
+				     currentEdge != (*rit)->edges_end();
+				     ++currentEdge) {
+					Triangulation::Vertex_handle sourceVertex = triangulation.insert(currentEdge->source(), startingSearchFace);
+					startingSearchFace = triangulation.incident_faces(sourceVertex);
+					Triangulation::Vertex_handle targetVertex = triangulation.insert(currentEdge->target(), startingSearchFace);
+					Triangulation::Constraint_id cid = triangulation.insert_constraint(sourceVertex, targetVertex);
+					startingSearchFace = triangulation.incident_faces(targetVertex);
+					edgesToTag.back().first.push_back(cid);
+				}
+				delete *rit;
+			}
+		} else {
+			if (ring.is_counterclockwise_oriented()) ring.reverse_orientation();
+
+			PolygonHandle *handle = new PolygonHandle(schemaIndex, fileNames.back(), 0, currentFace);
+			polygons.push_back(handle);
+
+			edgesToTag.push_back(std::pair<std::vector<Triangulation::Constraint_id>, std::vector<std::vector<Triangulation::Constraint_id>>>());
+			for (Ring::Edge_const_iterator currentEdge = ring.edges_begin();
+			     currentEdge != ring.edges_end();
+			     ++currentEdge) {
+				Triangulation::Vertex_handle sourceVertex = triangulation.insert(currentEdge->source(), startingSearchFace);
+				startingSearchFace = triangulation.incident_faces(sourceVertex);
+				Triangulation::Vertex_handle targetVertex = triangulation.insert(currentEdge->target(), startingSearchFace);
+				Triangulation::Constraint_id cid = triangulation.insert_constraint(sourceVertex, targetVertex);
+				startingSearchFace = triangulation.incident_faces(targetVertex);
+				edgesToTag.back().first.push_back(cid);
+			}
+		}
+	}
+
+	std::cout << "\tPolygons added. The triangulation has now:\n"
+	          << "\t\tTriangles: " << triangulation.number_of_faces() << std::endl;
+	return true;
+}
+
+bool IOWorker::exportTriangulationObj(Triangulation &t, const char *file) {
+	std::ofstream objFile(file);
+	if (!objFile.is_open()) {
+		std::cout << "Error: Could not write OBJ file " << file << std::endl;
+		return false;
+	}
+	objFile.precision(15);
+
+	std::map<Triangulation::Vertex_handle, int> vertexIndex;
+	int nextIndex = 1;
+
+	for (auto vit = t.finite_vertices_begin(); vit != t.finite_vertices_end(); ++vit) {
+		Point p = vit->point();
+		objFile << "v " << CGAL::to_double(p.x())
+		        << " " << CGAL::to_double(p.y())
+		        << " " << CGAL::to_double(p.z()) << "\n";
+		vertexIndex[vit] = nextIndex++;
+	}
+
+	for (auto fit = t.finite_faces_begin(); fit != t.finite_faces_end(); ++fit) {
+		objFile << "f " << vertexIndex[fit->vertex(0)]
+		        << " " << vertexIndex[fit->vertex(1)]
+		        << " " << vertexIndex[fit->vertex(2)] << "\n";
+	}
+
+	objFile.close();
+	std::cout << "\tWrote " << nextIndex - 1 << " vertices, "
+	          << std::distance(t.finite_faces_begin(), t.finite_faces_end()) << " faces" << std::endl;
+	return true;
 }
 
 unsigned int IOWorker::removeDuplicateVertices(std::list<Point> &ring) {
