@@ -96,7 +96,7 @@ private:
 		}
 		
 		~FieldDefinition() {
-			delete name;
+			delete[] name;
 		}
 		
 		bool matches(FieldDefinition *f) {

@@ -89,11 +89,12 @@ void Field::setValueFromInt(int v) {
 }
 
 StringField::StringField(const char *v) {
+	contents = NULL;
 	setValueFromString(v);
 }
 
 StringField::~StringField() {
-	free(contents);
+	delete[] contents;
 }
 
 bool StringField::operator<(const StringField &f) const {
@@ -113,6 +114,7 @@ const char * StringField::getValueAsString() {
 }
 
 void StringField::setValueFromString(const char *v) {
+	if (contents != NULL) delete[] contents;
 	contents = new char[(strlen(v)+1)];
 	strcpy(contents, v);
 }

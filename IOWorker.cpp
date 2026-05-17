@@ -20,14 +20,46 @@
  */
 
 #include "IOWorker.h"
+#include <cerrno>
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
+#include <limits>
+#include <sstream>
+#include <string>
+
+namespace {
+bool parseObjVertexIndex(const std::string &token, std::size_t vertexCount, int &index) {
+	std::string::size_type slash = token.find('/');
+	std::string vertexIndex = token.substr(0, slash);
+	if (vertexIndex.empty()) return false;
+
+	char *end = NULL;
+	errno = 0;
+	long parsed = std::strtol(vertexIndex.c_str(), &end, 10);
+	if (errno != 0 || end == vertexIndex.c_str() || *end != '\0') return false;
+	if (parsed < 0) parsed = (long)vertexCount + parsed + 1;
+	if (parsed < std::numeric_limits<int>::min() || parsed > std::numeric_limits<int>::max()) return false;
+
+	index = (int)parsed;
+	return true;
+}
+
+std::filesystem::path lowercaseExtension(const char *file) {
+	std::filesystem::path extension = std::filesystem::path(file).extension();
+	std::string extensionString = extension.string();
+	std::transform(extensionString.begin(), extensionString.end(), extensionString.begin(),
+	               [](unsigned char c) { return (char)std::tolower(c); });
+	return std::filesystem::path(extensionString);
+}
+}
 
 IOWorker::IOWorker() {
   startingSearchFace = Triangulation::Face_handle();
 }
 
 bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &edgesToTag, const char *file, unsigned int schemaIndex) {
-  std::filesystem::path extension = std::filesystem::path(file).extension();
+  std::filesystem::path extension = lowercaseExtension(file);
   if (extension.compare(".obj") == 0) {
     return addObjToTriangulation(triangulation, edgesToTag, file, schemaIndex);
   }
@@ -51,7 +83,7 @@ bool IOWorker::addToTriangulation(Triangulation &triangulation, TaggingVector &e
     OGRLayer *dataLayer = dataSource->GetLayer(currentLayer);
     dataLayer->ResetReading();
     const OGRSpatialReference* tmp = dataLayer->GetSpatialRef();
-    if ( (tmp != NULL) && (spatialReference != NULL) ) {
+    if ( (tmp != NULL) && (spatialReference == NULL) ) {
       spatialReference = tmp->Clone();
     }
 		
@@ -741,11 +773,13 @@ bool IOWorker::repairByPriorityList(Triangulation &triangulation, const char *fi
 				priorityFile >> fieldAsDouble;
 				DoubleField *newField = new DoubleField(fieldAsDouble);
 				priorityMap[newField] = currentPriority;
+				break;
 			} case OFTInteger: {
 				int fieldAsInt;
 				priorityFile >> fieldAsInt;
 				IntField *newField = new IntField(fieldAsInt);
 				priorityMap[newField] = currentPriority;
+				break;
 			} default: {
 				std::cout << "Field type not supported." << std::endl;
 				std::string fieldAsString;
@@ -901,11 +935,13 @@ bool IOWorker::repairEdgeMatching(Triangulation &triangulation, const char *file
 				priorityFile >> fieldAsDouble;
 				DoubleField *newField = new DoubleField(fieldAsDouble);
 				priorityMap[newField] = currentPriority;
+				break;
 			} case OFTInteger: {
 				int fieldAsInt;
 				priorityFile >> fieldAsInt;
 				IntField *newField = new IntField(fieldAsInt);
 				priorityMap[newField] = currentPriority;
+				break;
 			} default: {
 				std::cout << "Field type not supported." << std::endl;
 				std::string fieldAsString;
@@ -1256,7 +1292,7 @@ bool IOWorker::reconstructPolygons(Triangulation &triangulation, std::vector<std
 bool IOWorker::exportPolygons(std::vector<std::pair<PolygonHandle *, Polygon> > &outputPolygons, const char *file, bool withProvenance) {
 	
 	// Prepare file
-  std::filesystem::path extension = std::filesystem::path(file).extension();
+  std::filesystem::path extension = lowercaseExtension(file);
 	const char *driverName = NULL;
   if (extension.compare(".csv") == 0) driverName = "CSV";
   else if (extension.compare(".dxf") == 0) driverName = "DXF";
@@ -1383,7 +1419,7 @@ bool IOWorker::exportPolygons(std::vector<std::pair<PolygonHandle *, Polygon> > 
 bool IOWorker::exportTriangulation(Triangulation &t, const char *file, bool withNumberOfTags, bool withFields, bool withProvenance) {
 	
 	// Prepare file
-  std::filesystem::path extension = std::filesystem::path(file).extension();
+  std::filesystem::path extension = lowercaseExtension(file);
   if (extension.compare(".obj") == 0) {
     return exportTriangulationObj(t, file);
   }
@@ -1506,9 +1542,11 @@ bool IOWorker::exportTriangulation(Triangulation &t, const char *file, bool with
 				case OFTString:
           feature->SetField(fields[fieldEquivalencies[FieldDescriptor((*currentFace).info().getTags()->getOriginalFile(), (*currentFace).info().getTags()->getLayer(), currentField)]]->name,
                             (*currentFace).info().getTags()->getField(currentField)->getValueAsString());
+					break;
 				case OFTReal:
           feature->SetField(fields[fieldEquivalencies[FieldDescriptor((*currentFace).info().getTags()->getOriginalFile(), (*currentFace).info().getTags()->getLayer(), currentField)]]->name,
                             (*currentFace).info().getTags()->getField(currentField)->getValueAsDouble());
+					break;
 				case OFTInteger:
           feature->SetField(fields[fieldEquivalencies[FieldDescriptor((*currentFace).info().getTags()->getOriginalFile(), (*currentFace).info().getTags()->getLayer(), currentField)]]->name,
                             (*currentFace).info().getTags()->getField(currentField)->getValueAsInt());
@@ -1556,11 +1594,32 @@ bool IOWorker::addObjToTriangulation(Triangulation &triangulation, TaggingVector
 	std::cout << "\tPath: " << name << std::endl;
 	std::cout << "\tType: Wavefront OBJ" << std::endl;
 
+	if (schemaIndex != 0) {
+		std::cout << "\tOBJ has no attribute schema. Using synthetic face id field as schema." << std::endl;
+	}
+	if (triangulation.number_of_faces() == 0) {
+		schemaFieldType = OFTString;
+	}
+
+	FieldDefinition *objFaceField = new FieldDefinition("OBJFace", OFTString, OJUndefined, 0, 0);
+	unsigned int currentCheck;
+	for (currentCheck = 0; currentCheck < fields.size(); currentCheck++) {
+		if (objFaceField->matches(fields[currentCheck])) break;
+	} if (currentCheck == (unsigned int)fields.size()) {
+		fields.push_back(objFaceField);
+		fieldEquivalencies[FieldDescriptor(name, 0, 0)] = ((unsigned int)fields.size())-1;
+	} else {
+		delete objFaceField;
+		fieldEquivalencies[FieldDescriptor(name, 0, 0)] = currentCheck;
+	}
+
 	std::vector<K::Point_3> vertices;
 	std::vector<std::vector<int>> faceIndices;
 
 	std::string line;
+	unsigned long lineNumber = 0;
 	while (std::getline(objFile, line)) {
+		++lineNumber;
 		if (line.empty() || line[0] == '#') continue;
 		std::istringstream iss(line);
 		std::string prefix;
@@ -1568,22 +1627,33 @@ bool IOWorker::addObjToTriangulation(Triangulation &triangulation, TaggingVector
 
 		if (prefix == "v") {
 			double x, y, z = 0.0;
-			iss >> x >> y;
+			if (!(iss >> x >> y)) {
+				std::cout << "\tLine " << lineNumber << ": invalid vertex. Skipped." << std::endl;
+				continue;
+			}
 			if (!(iss >> z)) z = 0.0;
 			if (z != 0.0) hasZValues = true;
 			vertices.push_back(K::Point_3(x, y, z));
 		} else if (prefix == "f") {
 			std::vector<int> indices;
 			std::string token;
+			bool validFace = true;
 			while (iss >> token) {
-				int idx = std::stoi(token.substr(0, token.find('/')));
-				if (idx < 0) idx = (int)vertices.size() + idx + 1;
+				int idx;
+				if (!parseObjVertexIndex(token, vertices.size(), idx)) {
+					std::cout << "\tLine " << lineNumber << ": invalid face vertex '" << token << "'. Skipped." << std::endl;
+					validFace = false;
+					break;
+				}
 				indices.push_back(idx);
 			}
-			if (indices.size() >= 3)
+			if (!validFace) {
+				continue;
+			} else if (indices.size() >= 3) {
 				faceIndices.push_back(indices);
-			else
+			} else {
 				std::cout << "\tSkipping degenerate face with " << indices.size() << " vertices." << std::endl;
+			}
 		}
 	}
 	objFile.close();
@@ -1616,9 +1686,15 @@ bool IOWorker::addObjToTriangulation(Triangulation &triangulation, TaggingVector
 			std::cout << "\tFace #" << currentFace << " (" << ring.size() << " vertices): self intersecting. Split." << std::endl;
 			std::vector<Ring *> receivedRings = splitRing(ring);
 			for (auto rit = receivedRings.begin(); rit != receivedRings.end(); ++rit) {
+				if ((*rit)->area() == 0) {
+					delete *rit;
+					continue;
+				}
 				if (!(*rit)->is_clockwise_oriented())
 					(*rit)->reverse_orientation();
-				PolygonHandle *handle = new PolygonHandle(schemaIndex, fileNames.back(), 0, currentFace);
+				PolygonHandle *handle = new PolygonHandle(0, fileNames.back(), 0, currentFace);
+				std::string faceId = std::to_string(currentFace);
+				handle->addField(new StringField(faceId.c_str()));
 				polygons.push_back(handle);
 				edgesToTag.push_back(std::pair<std::vector<Triangulation::Constraint_id>, std::vector<std::vector<Triangulation::Constraint_id>>>());
 				for (Ring::Edge_const_iterator currentEdge = (*rit)->edges_begin();
@@ -1634,9 +1710,15 @@ bool IOWorker::addObjToTriangulation(Triangulation &triangulation, TaggingVector
 				delete *rit;
 			}
 		} else {
+			if (ring.area() == 0) {
+				std::cout << "\tFace #" << currentFace << ": zero area. Removed." << std::endl;
+				continue;
+			}
 			if (ring.is_counterclockwise_oriented()) ring.reverse_orientation();
 
-			PolygonHandle *handle = new PolygonHandle(schemaIndex, fileNames.back(), 0, currentFace);
+			PolygonHandle *handle = new PolygonHandle(0, fileNames.back(), 0, currentFace);
+			std::string faceId = std::to_string(currentFace);
+			handle->addField(new StringField(faceId.c_str()));
 			polygons.push_back(handle);
 
 			edgesToTag.push_back(std::pair<std::vector<Triangulation::Constraint_id>, std::vector<std::vector<Triangulation::Constraint_id>>>());
