@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -51,6 +52,14 @@ std::filesystem::path lowercaseExtension(const char *file) {
 	std::transform(extensionString.begin(), extensionString.end(), extensionString.begin(),
 	               [](unsigned char c) { return (char)std::tolower(c); });
 	return std::filesystem::path(extensionString);
+}
+
+bool hasRepeatedProjectedVertex(const std::list<Point> &ring) {
+	std::set<std::pair<K::FT, K::FT>> seen;
+	for (std::list<Point>::const_iterator currentPoint = ring.begin(); currentPoint != ring.end(); ++currentPoint) {
+		if (!seen.insert(std::make_pair(currentPoint->x(), currentPoint->y())).second) return true;
+	}
+	return false;
 }
 }
 
@@ -1207,7 +1216,7 @@ bool IOWorker::reconstructPolygons(Triangulation &triangulation, std::vector<std
       // New chain
       if (repeatedVertices.count(*currentVertex) > 0) {
         // Closed by itself
-        if (newChain->front() == *currentVertex) {
+        if (!newChain->empty() && newChain->front() == *currentVertex) {
           // Degenerate (insufficient vertices to be valid)
           if (newChain->size() < 3) delete newChain;
           else {
@@ -1243,8 +1252,12 @@ bool IOWorker::reconstructPolygons(Triangulation &triangulation, std::vector<std
           // Open
           else {
             // Not first chain
-            if (repeatedVertices.count(newChain->front()) > 0) vertexChainMap[newChain->front()] = newChain;
-            chainsStack.push(newChain);
+            if (!newChain->empty()) {
+              if (repeatedVertices.count(newChain->front()) > 0) vertexChainMap[newChain->front()] = newChain;
+              chainsStack.push(newChain);
+            } else {
+              delete newChain;
+            }
           }
         } newChain = new std::list<Triangulation::Vertex_handle>();
       } newChain->push_back(*currentVertex);
@@ -1680,6 +1693,10 @@ bool IOWorker::addObjToTriangulation(Triangulation &triangulation, TaggingVector
 			std::cout << "\tFace #" << currentFace << ": less than 3 vertices. Removed." << std::endl;
 			continue;
 		}
+		if (hasRepeatedProjectedVertex(ringPoints)) {
+			std::cout << "\tFace #" << currentFace << ": repeated projected vertex. Removed." << std::endl;
+			continue;
+		}
 
 		Ring ring(ringPoints.begin(), ringPoints.end());
 		if (!ring.is_simple()) {
@@ -1895,7 +1912,7 @@ std::vector<Ring *> IOWorker::splitRing(Ring &ring) {
       // New chain
       if (repeatedVertices.count(*currentVertex) > 0) {
         // Closed by itself
-        if (newChain->front() == *currentVertex) {
+        if (!newChain->empty() && newChain->front() == *currentVertex) {
           // Degenerate (insufficient vertices to be valid)
           if (newChain->size() < 3) delete newChain;
           else {
@@ -1933,8 +1950,12 @@ std::vector<Ring *> IOWorker::splitRing(Ring &ring) {
           // Open
           else {
             // Not first chain
-            if (repeatedVertices.count(newChain->front()) > 0) vertexChainMap[newChain->front()] = newChain;
-            chainsStack.push(newChain);
+            if (!newChain->empty()) {
+              if (repeatedVertices.count(newChain->front()) > 0) vertexChainMap[newChain->front()] = newChain;
+              chainsStack.push(newChain);
+            } else {
+              delete newChain;
+            }
           }
         } newChain = new std::list<Triangulation::Vertex_handle>();
       } newChain->push_back(*currentVertex);
@@ -2340,6 +2361,12 @@ void IOWorker::insertTriangulationInfo(std::ostream &ostr, const Triangulation &
 		else if ((*currentFace).info().hasOneTag()) onetag++;
 		else multipletags++;
 	} total = onetag + multipletags + untagged;
+	if (total == 0) {
+		ostr << "\tHoles:    0 triangles (0.000000 %)" << std::endl <<
+		"\tOk:       0 triangles (0.000000 %)" << std::endl <<
+		"\tOverlaps: 0 triangles (0.000000 %)" << std::endl;
+		return;
+	}
   ostr << "\tHoles:    " << untagged << " triangles (" << 100.0*untagged/total << " %)" << std::endl <<
   "\tOk:       " << onetag << " triangles (" << 100.0*onetag/total << " %)" << std::endl <<
   "\tOverlaps: " << multipletags << " triangles (" << 100.0*multipletags/total << " %)" << std::endl;
